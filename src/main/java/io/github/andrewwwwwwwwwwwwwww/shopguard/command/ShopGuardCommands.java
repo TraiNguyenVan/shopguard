@@ -3,10 +3,12 @@ package io.github.andrewwwwwwwwwwwwwww.shopguard.command;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.LongArgumentType;
 import io.github.andrewwwwwwwwwwwwwww.shopguard.ClaimVisualizer;
+import io.github.andrewwwwwwwwwwwwwww.shopguard.Config;
 import io.github.andrewwwwwwwwwwwwwww.shopguard.ProtectionHandler;
 import io.github.andrewwwwwwwwwwwwwww.shopguard.ShopGuard;
 import io.github.andrewwwwwwwwwwwwwww.shopguard.claim.AdminZone;
 import io.github.andrewwwwwwwwwwwwwww.shopguard.claim.Claim;
+import io.github.andrewwwwwwwwwwwwwww.shopguard.economy.ClaimPricing;
 import net.minecraft.ChatFormatting;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
@@ -19,6 +21,7 @@ import net.minecraft.server.level.ServerPlayer;
 
 import java.util.Collection;
 import java.util.List;
+import java.util.UUID;
 
 /**
  * The {@code /claim} command tree, kept deliberately small:
@@ -28,6 +31,8 @@ import java.util.List;
  *   <li>{@code /claim show} — toggle border visibility (zones dark red, your claims green, others orange).</li>
  *   <li>{@code /claim remove} — remove the claim you're standing in (owner; ops may remove anyone's).</li>
  *   <li>{@code /claim trust <player>} — toggle a player's build access on the claim you're standing in.</li>
+ *   <li>{@code /claim transfer <player> [confirm]} — hand the claim you're standing in to another player
+ *       (owner; ops may transfer anyone's). A clean handover unless {@code keepOldOwnerTrusted} is set.</li>
  *   <li>{@code /claim zone add|list|remove} — ops: manage the zones players may claim in.</li>
  * </ul>
  */
@@ -57,6 +62,11 @@ public final class ShopGuardCommands {
                 .then(Commands.literal("trust")
                         .then(Commands.argument("player", EntityArgument.player())
                                 .executes(ctx -> trustToggle(ctx.getSource(), EntityArgument.getPlayer(ctx, "player")))))
+                .then(Commands.literal("transfer")
+                        .then(Commands.argument("player", EntityArgument.player())
+                                .executes(ctx -> transfer(ctx.getSource(), EntityArgument.getPlayer(ctx, "player"), false))
+                                .then(Commands.literal("confirm")
+                                        .executes(ctx -> transfer(ctx.getSource(), EntityArgument.getPlayer(ctx, "player"), true)))))
                 .then(zone));
     }
 
@@ -103,7 +113,12 @@ public final class ShopGuardCommands {
             for (Claim c : mine) {
                 int n = ++ord;
                 s.sendSuccess(() -> Component.literal(" • #" + n + " — " + c.shape.count() + " blocks near "
-                        + c.shape.minX() + ", " + c.shape.minZ() + " (" + c.dimension + ")")
+                        + c.shape.minX() + ", " + c.shape.minZ() + " (" + c.dimension + ")"
+                        + (c.outstandingPaid() > 0
+                        ? " — paid " + ClaimPricing.money(c.paid)
+                        + (c.refunded > 0 ? ", " + ClaimPricing.money(c.refunded) + " refunded" : "")
+                        + ", " + ClaimPricing.money(c.outstandingPaid()) + " returnable"
+                        : ""))
                         .withStyle(ChatFormatting.GRAY), false);
             }
             int total = ShopGuard.STORE.totalCellsOfOwner(sp.getUUID());
@@ -112,6 +127,10 @@ public final class ShopGuardCommands {
                     : "Total claimed: " + total + " / " + ShopGuard.CONFIG.maxTotalPerPlayer + " blocks.";
             s.sendSuccess(() -> Component.literal(totalMsg).withStyle(ChatFormatting.GRAY), false);
         }
+
+        // The pricing derivation in force, so the cost is never a mystery. `/bal` and the shovel overlay
+        // report the same numbers, and every constant behind them is a key in config/shopguard.json.
+        ClaimPricing.describe(sp, line -> s.sendSuccess(() -> line, false));
         return 1;
     }
 
@@ -134,6 +153,20 @@ public final class ShopGuardCommands {
 
     // ---- /claim remove: owner (ops: anyone's) ----
 
+    /**
+     * Release the claim underfoot.
+     *
+     * <p>For the owner this is a sale back to the server, so it pays a refund: half of what the claim
+     * cost, less the refund fee, drawn from a daily allowance shared with the {@code /sell} faucet.
+     * The price is the one recorded when the land was bought, never re-derived from the live inflation
+     * factor — otherwise a player could buy cheap during a deflationary stretch and cash out during an
+     * inflationary one.
+     *
+     * <p>The release is refused outright when the refund won't fit in today's allowance, because the
+     * money model has no negative balances and no escrow: paying part would mean holding land against a
+     * debt it can't represent, or silently forfeiting the rest. An op removing someone else's claim is a
+     * grief response and never pays out.
+     */
     private static int remove(CommandSourceStack s) {
         ServerPlayer sp = player(s);
         if (sp == null) return notPlayer(s);
@@ -142,16 +175,27 @@ public final class ShopGuardCommands {
             s.sendFailure(Component.literal("Stand inside a claim to remove it."));
             return 0;
         }
-        if (!c.owner.equals(sp.getUUID()) && !ProtectionHandler.isOp(sp)) {
+        boolean isOwner = c.owner.equals(sp.getUUID());
+        if (!isOwner && !ProtectionHandler.isOp(sp)) {
             s.sendFailure(Component.literal("That claim isn't yours."));
             return 0;
         }
-        String label = c.owner.equals(sp.getUUID())
+        String label = isOwner
                 ? "your claim #" + ShopGuard.STORE.ordinalOf(c)
                 : c.ownerName + "'s claim";
+
+        ClaimPricing.Result refund = isOwner
+                ? ClaimPricing.refund(sp, c)
+                : ClaimPricing.Result.free();
+        if (!refund.ok()) {
+            s.sendFailure(Component.literal(refund.reason()));
+            return 0;
+        }
         ShopGuard.STORE.remove(c.id);
         ClaimVisualizer.refresh(sp.level());
-        s.sendSuccess(() -> Component.literal("Removed " + label + ".").withStyle(ChatFormatting.YELLOW), false);
+        s.sendSuccess(() -> Component.literal("Removed " + label + "."
+                        + (refund.amount() > 0 ? " Refunded " + ClaimPricing.money(refund.amount()) + "." : ""))
+                .withStyle(ChatFormatting.YELLOW), false);
         return 1;
     }
 
@@ -175,6 +219,72 @@ public final class ShopGuardCommands {
         String name = target.getName().getString();
         s.sendSuccess(() -> Component.literal(name + (added ? " is now trusted" : " is no longer trusted")
                 + " on this claim.").withStyle(added ? ChatFormatting.GREEN : ChatFormatting.YELLOW), false);
+        return 1;
+    }
+
+    // ---- /claim transfer <player> [confirm]: owner (ops: anyone's) ----
+
+    /**
+     * Hand the claim underfoot to another player. Without {@code confirm} this only describes what would
+     * happen, so a mistyped name can't quietly hand a build away. What the previous owner is left with is
+     * {@link Config#keepOldOwnerTrusted}: by default a clean handover (they lose access, like every other
+     * land-claim mod); with the flag on they stay trusted and keep building.
+     */
+    private static int transfer(CommandSourceStack s, ServerPlayer target, boolean confirmed) {
+        ServerPlayer sp = player(s);
+        if (sp == null) return notPlayer(s);
+        Claim c = standingClaim(sp);
+        if (c == null) {
+            s.sendFailure(Component.literal("Stand inside a claim to transfer it."));
+            return 0;
+        }
+        boolean isOwner = c.owner.equals(sp.getUUID());
+        if (!isOwner && !ProtectionHandler.isOp(sp)) {
+            s.sendFailure(Component.literal("That claim isn't yours."));
+            return 0;
+        }
+        String name = target.getName().getString();
+        if (c.owner.equals(target.getUUID())) {
+            s.sendFailure(Component.literal(name + " already owns this claim."));
+            return 0;
+        }
+        // The recipient inherits the whole footprint, so their total limit has to cover it.
+        int recipientTotal = ShopGuard.STORE.totalCellsOfOwner(target.getUUID()) + c.shape.count();
+        if (!ProtectionHandler.isOp(target) && recipientTotal > ShopGuard.CONFIG.maxTotalPerPlayer) {
+            s.sendFailure(Component.literal(name + " would go over their total claim limit ("
+                    + ShopGuard.CONFIG.maxTotalPerPlayer + " blocks)."));
+            return 0;
+        }
+
+        // Describe the claim before the owner changes, so the ordinal still refers to the sender's list.
+        boolean keepTrusted = ShopGuard.CONFIG.keepOldOwnerTrusted;
+        String label = isOwner ? "your claim #" + ShopGuard.STORE.ordinalOf(c) : c.ownerName + "'s claim";
+        if (!confirmed) {
+            s.sendSuccess(() -> Component.literal("Transfer " + label + " (" + c.shape.count()
+                    + " blocks) to " + name + "? Re-run with: /claim transfer " + name + " confirm")
+                    .withStyle(ChatFormatting.YELLOW), false);
+            s.sendSuccess(() -> Component.literal(keepTrusted
+                            ? "You'll keep build access (keepOldOwnerTrusted is on)."
+                            : "You'll lose access to it (keepOldOwnerTrusted is off).")
+                    .withStyle(ChatFormatting.GRAY), false);
+            return 1;
+        }
+
+        UUID prevOwner = c.owner;
+        c.owner = target.getUUID();
+        c.ownerName = name;
+        if (keepTrusted) c.trusted.add(prevOwner);
+        ShopGuard.STORE.save();
+        ClaimVisualizer.refresh(sp.level());
+        String tail = isOwner
+                ? (keepTrusted ? " — you're now trusted on it." : " — you no longer have access to it.")
+                : ".";
+        s.sendSuccess(() -> Component.literal("Transferred " + label + " to " + name + tail)
+                .withStyle(ChatFormatting.GREEN), false);
+        if (target != sp) {
+            target.sendSystemMessage(Component.literal(sp.getName().getString() + " transferred a claim to you ("
+                    + c.shape.count() + " blocks). /claim lists it.").withStyle(ChatFormatting.GREEN));
+        }
         return 1;
     }
 

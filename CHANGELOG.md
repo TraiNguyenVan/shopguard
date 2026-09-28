@@ -1,5 +1,56 @@
 # Changelog
 
+## 0.11.0
+- **New: priced land claims, tied to the server's inflation.** New claim area costs money, and the price
+  moves with the money supply automatically. **Disabled by default** — `claimCostEnabled` and
+  `claimRefundEnabled` both ship `false`, so the jar is inert until you turn them on.
+  - `cost = claimCostBaseFee + ceil(newBlocks x claimCostPerBlock x f)`, where
+    `f = clamp(inflationMultiplier / claimCostReferenceMultiplier, claimCostMinFactor, claimCostMaxFactor)`
+    and `inflationMultiplier` comes from EconomyCraft's dynamic price engine (median active balance over
+    `startingBalance`, refreshed hourly). At today's 7.36x reading against the default 7.36 reference,
+    `f = 1.0` and a block costs 2.5.
+  - **`f` is compressed and anchored, not the raw multiplier.** The raw signal spans 0.5x..100x, which at
+    any sane rate would price poorer players out of land they already hold within a few months. Anchored
+    to a reference it moves proportionally instead, and the clamps keep a collapse from making land free
+    and runaway inflation from making it unclaimable.
+  - **Only new area is billed.** Touching claims merge, so selecting a rectangle that overlaps what you
+    already hold costs nothing — expanding a claim never re-charges the region.
+  - **New: `/claim remove` refunds.** You get back `claimRefundFeeRate`'s complement of what the claim
+    actually cost (default: half), drawn from a per-player daily allowance set by the new
+    `claimRefundDailyLimit` (default 2500). A release too large for today's allowance is **refused**, not
+    partly paid — the economy has no negative balances and no escrow, so carve the claim down or come
+    back tomorrow.
+  - **The refund pace is ShopGuard's own key, not EconomyCraft's `dailySellLimit`.** That flag is the
+    ceiling on residual `/sell` proceeds and nothing else; reading it as a general money-creation budget
+    would have coupled two unrelated policies. The defaults match so the pace is familiar, but they are
+    independent — re-check `claimRefundDailyLimit` if you retune `dailySellLimit`.
+  - **Refunds use the price you paid, not today's price.** Re-deriving it from the live factor would let
+    you buy land cheap in a deflationary stretch and cash out in an inflationary one.
+  - **Carving pays nothing but reduces the claim's recorded cost** in proportion to the area removed —
+    otherwise you could claim a large area, carve it to one block, and release it for the full amount.
+  - Carving a claim to nothing is a release, so it can be refused; if so the carve is rolled back and you
+    keep both the land and the money.
+  - Money movement is logged as `shopguard:claimcost` and `shopguard:claimrefund`. Merging claims sums
+    their recorded cost, so a merge never destroys refundable value.
+  - **New: every constant is a config key** in `shopguard.json` — nothing in the derivation is hardcoded.
+    Bare `/claim` prints the rate, the factor, the inflation reading against the reference, what your
+    balance buys, and your remaining refund allowance; each claim shows paid/refunded/returnable. Setting
+    the first shovel corner states the current rate.
+  - **Requires two EconomyCraft API additions** (`inflationMultiplier`, `medianActiveBalance`).
+    EconomyCraft is a *soft* dependency: without it ShopGuard still works and claims are simply free. A
+    gradle `verifyEconomycraftJar` task fails the build if `libs/` holds a jar that predates them.
+  - 35 tests over the pricing arithmetic and the refund ledger.
+
+## 0.10.0
+- **New: `/claim transfer <player>`.** Hand a claim to another player without losing the shape or the
+  trust list — the old "delete the claim, have them re-claim it with the shovel" dance is gone.
+  - Dry run first: `/claim transfer <player>` reports the claim and its size and changes nothing;
+    `/claim transfer <player> confirm` performs it. Owner only, ops can transfer anyone's.
+  - **Clean handover by default:** the seller loses access to the claim, like any other land-claim
+    mod. New config `keepOldOwnerTrusted: true` leaves them on the trust list instead, so nobody is
+    locked out of a shop they just gave away. The dry run tells you which way it's set.
+  - The recipient's `maxTotalPerPlayer` limit is enforced (ops exempt), and they get a chat notice.
+
 ## 0.9.0
 - **Minecraft 26.3 build.** ShopGuard now ships for 26.3 (Fabric Loader 0.19.3 → 0.19.5, Fabric API
   0.152.1+26.2 → 0.160.5+26.3). The 26.2 build carries on alongside it. No behaviour changes.

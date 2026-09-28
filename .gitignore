@@ -5,5 +5,11 @@ build/
 out/
 run/
 .fabric/
+logs/
+
+# Compile-time EconomyCraft jar, refreshed from a local EconomyCraft build (see economycraft_jar
+# in gradle.properties). A vendored binary would bloat history and go stale silently.
+libs/
+
 .DS_Store
 Thumbs.db

@@ -2,6 +2,7 @@ package io.github.andrewwwwwwwwwwwwwww.shopguard;
 
 import io.github.andrewwwwwwwwwwwwwww.shopguard.claim.Claim;
 import io.github.andrewwwwwwwwwwwwwww.shopguard.claim.ClaimShape;
+import io.github.andrewwwwwwwwwwwwwww.shopguard.economy.ClaimPricing;
 import net.fabricmc.fabric.api.event.player.UseBlockCallback;
 import net.fabricmc.fabric.api.event.player.UseItemCallback;
 import net.minecraft.ChatFormatting;
@@ -104,9 +105,25 @@ public final class ClaimTool {
             sp.sendOverlayMessage(Component.literal(
                     (carve ? "Carve" : "Claim") + ": first corner set — right-click the opposite corner.")
                     .withStyle(ChatFormatting.YELLOW));
+            if (!carve) quoteRate(sp);
             return;
         }
         if (carve) carve(sp, first, pos); else add(sp, first, pos);
+    }
+
+    /**
+     * State the current price scale when the first corner is set.
+     *
+     * <p>The total isn't knowable yet — the rectangle isn't selected — so this quotes the rate instead,
+     * which is what lets a player work out the cost of the area they have in mind before committing to
+     * the second click. The amount actually charged is reported on completion.
+     */
+    private static void quoteRate(ServerPlayer sp) {
+        if (!ClaimPricing.charging()) return;
+        if (ShopGuard.CONFIG.claimCostFreeForOps && ProtectionHandler.isOp(sp)) return;
+        sp.sendOverlayMessage(Component.literal("Costs " + ClaimPricing.money(ClaimPricing.quote(1))
+                        + " per block right now (inflation factor " + ClaimPricing.trim(ClaimPricing.factor()) + "x)")
+                .withStyle(ChatFormatting.AQUA));
     }
 
     private static String dim(ServerPlayer sp) {
@@ -158,6 +175,25 @@ public final class ClaimTool {
             return;
         }
 
+        // Charge the net-new columns only, and only once every check above has passed.
+        //
+        // This deliberately happens BEFORE any mutation of the store. The merge below deletes the absorbed
+        // claims, so charging afterwards and bailing on failure would leave the merge half-applied — the
+        // surviving claim would still hold its old shape while its siblings had already been dropped from
+        // the map, and the next save would persist that loss.
+        int netNew = merged.count() - absorbedCells;
+        ClaimPricing.Result charge = ClaimPricing.charge(sp, netNew);
+        if (!charge.ok()) {
+            error(sp, charge.reason());
+            return;
+        }
+
+        // The absorbed claims' money carries into the survivor. Their area is now part of this claim, so
+        // without summing their `paid` a merge would quietly destroy the refundable value of ground the
+        // player had already paid for.
+        long mergedPaid = 0L;
+        for (Claim c : absorb) mergedPaid = saturatedAdd(mergedPaid, c.paid);
+
         boolean mergedExisting = !absorb.isEmpty();
         Claim result;
         if (mergedExisting) {
@@ -166,10 +202,19 @@ public final class ClaimTool {
         } else {
             result = ShopGuard.STORE.newClaim(uid, sp.getName().getString(), dim);
         }
+        result.paid = saturatedAdd(mergedPaid, charge.amount());
+        result.refunded = 0L; // one combined claim, one clean refund ledger
         result.shape = merged;
         ShopGuard.STORE.save();
         ClaimVisualizer.refresh(sp.level());
-        ok(sp, (mergedExisting ? "Claim updated" : "Claim created") + " — " + result.shape.count() + " blocks.");
+        ok(sp, (mergedExisting ? "Claim updated" : "Claim created") + " — " + result.shape.count() + " blocks."
+                + (charge.amount() > 0 ? " Cost " + ClaimPricing.money(charge.amount())
+                        + " for " + netNew + " new blocks." : ""));
+    }
+
+    private static long saturatedAdd(long a, long b) {
+        long sum = a + b;
+        return sum < 0 ? Long.MAX_VALUE : sum;
     }
 
     private static void carve(ServerPlayer sp, BlockPos a, BlockPos b) {
@@ -181,15 +226,67 @@ public final class ClaimTool {
             error(sp, "Carve from inside your own claim (first corner must be claimed land).");
             return;
         }
+
+        ClaimShape original = target.shape.copy();
+        long paidBefore = target.paid;
+        int before = target.shape.count();
+
         target.shape.removeRect(a.getX(), a.getZ(), b.getX(), b.getZ());
+        int after = target.shape.count();
+
+        // Carving pays no cash by default, but the claim's recorded `paid` drops in proportion to the area
+        // removed. Without that, a player could claim a large area, carve it down to a single column for
+        // free, and still release the claim for the original full amount.
+        long cash = ClaimPricing.carve(target, before, after)[0];
+
         if (target.shape.isEmpty()) {
+            // Carved to nothing: the owner is giving the land up, so this is a release, not a reshape.
+            // An op doing it is a grief response, not a sale, so it never pays the owner out.
+            boolean ownerRelease = target.owner.equals(uid);
+            ClaimPricing.Result refund = ownerRelease
+                    ? ClaimPricing.refund(sp, target)
+                    : ClaimPricing.Result.free();
+            if (!refund.ok()) {
+                // Nothing has been credited and nothing has been deleted, so undo the carve wholesale and
+                // leave the player with both their land and their money.
+                target.shape = original;
+                target.paid = paidBefore;
+                error(sp, refund.reason());
+                return;
+            }
             ShopGuard.STORE.remove(target.id);
-            ok(sp, "Claim removed (carved to nothing).");
+            // Pay the carve's own refund, if the rate asked for one. `paid` was already reduced to zero by
+            // the carve, so the release refund above is necessarily 0 on this path — these are not two
+            // payments for the same money, the carve consumed the ledger and this pays for it.
+            long carveCash = payCarveRefund(sp, target, cash);
+            ok(sp, "Claim released."
+                    + (refund.amount() > 0 ? " Refunded " + ClaimPricing.money(refund.amount()) + "." : "")
+                    + (carveCash > 0 ? " Refunded " + ClaimPricing.money(carveCash) + " for the carved area."
+                            : ""));
         } else {
+            long carveCash = payCarveRefund(sp, target, cash);
             ShopGuard.STORE.save();
-            ok(sp, "Carved — " + target.shape.count() + " blocks remain.");
+            ok(sp, "Carved — " + after + " blocks remain."
+                    + (carveCash > 0 ? " Refunded " + ClaimPricing.money(carveCash) + "." : ""));
         }
         ClaimVisualizer.refresh(sp.level());
+    }
+
+    /**
+     * Pay what a kept carve earned, and report what was actually paid.
+     *
+     * <p>The returned amount is what the player received, which is not necessarily {@code owed}: at the
+     * default rate it is always 0, and if the economy is unavailable there is nobody to pay. Returning the
+     * real figure keeps the confirmation message honest instead of announcing a refund that never landed.
+     */
+    private static long payCarveRefund(ServerPlayer sp, Claim claim, long owed) {
+        if (owed <= 0) return 0L;
+        if (!ClaimPricing.creditCarveRefund(sp, claim, owed)) {
+            ShopGuard.LOGGER.warn("Carve refund of {} for {} could not be credited; the claim's recorded "
+                    + "cost was still reduced.", owed, claim.id);
+            return 0L;
+        }
+        return owed;
     }
 
     private static void error(ServerPlayer sp, String msg) {

@@ -10,6 +10,18 @@ dependencies {
     minecraft "com.mojang:minecraft:${project.minecraft_version}"
     implementation "net.fabricmc:fabric-loader:${project.loader_version}"
     implementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
+
+    // Claim pricing calls the EconomyCraft API. compileOnly, not implementation: the classes resolve at
+    // runtime from the mod jar on the server, and ShopGuard must still load and run when EconomyCraft is
+    // absent. Every call site goes through the ClaimEconomy.Backend indirection for that reason.
+    compileOnly files("${project.economycraft_jar}")
+
+    testImplementation 'org.junit.jupiter:junit-jupiter:5.13.4'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher:1.13.4'
+}
+
+tasks.withType(Test).configureEach {
+    useJUnitPlatform()
 }
 
 processResources {
@@ -23,6 +35,37 @@ processResources {
 tasks.withType(JavaCompile).configureEach {
     it.options.release = 25
 }
+
+// Fail loudly rather than silently compiling against a stale API: claim pricing calls three EconomyCraft
+// API methods, and a jar without them would surface as a confusing "cannot find symbol" deep in the
+// build log instead of "your EconomyCraft is too old".
+tasks.register('verifyEconomycraftJar') {
+    def jar = file(project.economycraft_jar)
+    def required = [
+            'com/reazip/economycraft/api/v1/EconomyCraftApi.class',
+            'com/reazip/economycraft/api/v1/BalanceApi.class',
+            'com/reazip/economycraft/api/v1/BalanceMutationResult.class',
+            'com/reazip/economycraft/api/v1/MutationSource.class',
+    ]
+    inputs.file(jar)
+    doLast {
+        if (!jar.exists()) {
+            throw new GradleException("EconomyCraft jar not found at ${jar}. Build EconomyCraft first, " +
+                    "or copy its fabric jar to libs/ (see economycraft_jar in gradle.properties).")
+        }
+        def missing = []
+        new java.util.zip.ZipFile(jar).withCloseable { zip ->
+            required.each { if (zip.getEntry(it) == null) missing << it }
+        }
+        if (missing) {
+            throw new GradleException("The EconomyCraft jar at ${jar} is missing API classes " +
+                    "${missing.join(', ')}. It predates the claim-pricing API additions " +
+                    "(inflationMultiplier / medianActiveBalance / dailySellLimit) — rebuild EconomyCraft.")
+        }
+    }
+}
+
+tasks.named('compileJava') { dependsOn 'verifyEconomycraftJar' }
 
 java {
     withSourcesJar()

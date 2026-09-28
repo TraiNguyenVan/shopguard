@@ -23,6 +23,8 @@ public class ShopGuard implements ModInitializer {
 
     public static MinecraftServer server;
     public static final ClaimStore STORE = new ClaimStore();
+    public static final io.github.andrewwwwwwwwwwwwwww.shopguard.economy.RefundLedger REFUND_LEDGER =
+            new io.github.andrewwwwwwwwwwwwwww.shopguard.economy.RefundLedger();
     public static Config CONFIG = new Config();
 
     @Override
@@ -50,9 +52,32 @@ public class ShopGuard implements ModInitializer {
         ServerLifecycleEvents.SERVER_STARTED.register(srv -> {
             server = srv;
             STORE.load();
+            REFUND_LEDGER.load();
+            if (CONFIG.claimCostEnabled || CONFIG.claimRefundEnabled) {
+                LOGGER.info("Claim pricing: charge={} refund={} economy={}",
+                        CONFIG.claimCostEnabled, CONFIG.claimRefundEnabled,
+                        io.github.andrewwwwwwwwwwwwwww.shopguard.economy.ClaimEconomy.backend() != null
+                                ? "present" : "ABSENT — claims will be free");
+            }
+            if (CONFIG.claimRefundEnabled && CONFIG.claimRefundDailyLimit <= 0) {
+                LOGGER.warn("claimRefundEnabled is true but claimRefundDailyLimit is {} — players would pay "
+                        + "for claim area and then be unable to release any of it for a refund. Raise the "
+                        + "limit or turn refunds off.", CONFIG.claimRefundDailyLimit);
+            }
+            if (CONFIG.claimCostEnabled && !CONFIG.claimRefundEnabled) {
+                LOGGER.warn("claimCostEnabled is on while claimRefundEnabled is off: claim area is charged "
+                        + "as a permanent burn with no way to get the money back. That may be intentional, "
+                        + "but it is a one-way door.");
+            }
+            if (CONFIG.claimCarveRefundRate > 0) {
+                LOGGER.warn("claimCarveRefundRate is {}: carving now pays cash, and that payout is NOT "
+                        + "paced by claimRefundDailyLimit. Carving becomes a second, uncapped way for the "
+                        + "server to create money.", CONFIG.claimCarveRefundRate);
+            }
         });
         ServerLifecycleEvents.SERVER_STOPPING.register(srv -> {
             STORE.save();
+            REFUND_LEDGER.save();
             server = null;
         });
     }

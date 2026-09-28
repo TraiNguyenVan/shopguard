@@ -37,6 +37,16 @@ public final class ClaimShape {
     public int maxX() { return minX + width - 1; }
     public int maxZ() { return minZ + depth - 1; }
 
+    /**
+     * An independent deep copy — the bitset is cloned and the bounds copied, so mutating either shape
+     * can't affect the other. Used to snapshot a claim before a carve so it can be rolled back when a
+     * later step (a release refund) is refused.
+     */
+    public ClaimShape copy() {
+        if (width == 0) return new ClaimShape();
+        return new ClaimShape(minX, minZ, width, depth, (BitSet) cells.clone());
+    }
+
     public boolean contains(int x, int z) {
         if (width == 0 || x < minX || z < minZ || x > maxX() || z > maxZ()) return false;
         return cells.get((x - minX) + (z - minZ) * width);

@@ -16,5 +16,8 @@
     "fabricloader": ">=0.19.3",
     "fabric-api": ">=0.152.1",
     "minecraft": "~26.3"
+  },
+  "recommends": {
+    "economycraft": ">=1.10.0"
   }
 }

@@ -67,10 +67,19 @@ tasks.register('verifyEconomycraftJar') {
 
 tasks.named('compileJava') { dependsOn 'verifyEconomycraftJar' }
 
+// Loom compiles against Minecraft's Java release, and Gradle otherwise resolves the toolchain to whatever
+// `java` is on PATH. On this machine that is the JRE at /usr/lib/jvm/java-25-openjdk-amd64, which has no
+// javac, so :compileJava failed with "does not provide the required capabilities: [JAVA_COMPILER]".
+// The same plugin EconomyCraft applies provisions (or reuses) a real JDK 25 in ~/.gradle/jdks instead.
+apply plugin: "jvm-toolchains"
+
 java {
     withSourcesJar()
     sourceCompatibility = JavaVersion.VERSION_25
     targetCompatibility = JavaVersion.VERSION_25
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(25)
+    }
 }
 
 jar {

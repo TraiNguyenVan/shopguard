@@ -37,6 +37,7 @@ public class ShopGuard implements ModInitializer {
         AdminZoneTool.register();
         ProtectionHandler.register();
         ClaimVisualizer.register();
+        io.github.andrewwwwwwwwwwwwwww.shopguard.faction.AnarchistLandReconciler.register();
 
         CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) ->
                 ShopGuardCommands.register(dispatcher));

@@ -41,6 +41,11 @@ final class EconomyCraftFactionsBackend implements PlayerFactions.Backend {
     }
 
     @Override
+    public boolean hasChosen(UUID playerId) {
+        return api().factions().hasChosen(playerId);
+    }
+
+    @Override
     public double claimCostMultiplier(UUID playerId) {
         return api().factions().claimCostMultiplier(playerId);
     }

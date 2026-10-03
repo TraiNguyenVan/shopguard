@@ -35,6 +35,14 @@ public final class PlayerFactions {
         /** The party's English display name, for telling a player which party refused them. */
         String factionDisplayName(UUID playerId);
 
+        /**
+         * Whether the player has actually chosen a party, as opposed to falling back to the default.
+         *
+         * <p>Needed because the default party is Anarchism, so the id alone cannot distinguish an opt-in
+         * from a player who has never been asked. See {@link ClaimPermissions}.
+         */
+        boolean hasChosen(UUID playerId);
+
         /** The multiplier to apply to this player's claim cost. {@code 1.0} means unchanged. */
         double claimCostMultiplier(UUID playerId);
     }
@@ -78,19 +86,39 @@ public final class PlayerFactions {
         return backend == null ? null : backend.factionId(playerId);
     }
 
+    /**
+     * Whether this player has actually chosen a party.
+     *
+     * <p>{@code false} whenever there is no backend, so a server without EconomyCraft is unrestricted — the
+     * same degradation as every other method here.
+     */
+    public static boolean hasChosen(UUID playerId) {
+        Backend backend = backend();
+        return backend != null && backend.hasChosen(playerId);
+    }
+
     /** Whether this player may claim land, given their party. */
     public static boolean mayClaim(UUID playerId) {
-        return ClaimPermissions.mayClaim(factionId(playerId));
+        return ClaimPermissions.mayClaim(factionId(playerId), hasChosen(playerId));
     }
 
     /** Whether a claim may be transferred <em>to</em> this player. */
     public static boolean mayReceiveTransfer(UUID playerId) {
-        return ClaimPermissions.mayReceiveTransfer(factionId(playerId));
+        return ClaimPermissions.mayReceiveTransfer(factionId(playerId), hasChosen(playerId));
     }
 
     /** Whether this player may be added to another player's trust list. */
     public static boolean mayBeTrusted(UUID playerId) {
-        return ClaimPermissions.mayBeTrusted(factionId(playerId));
+        return ClaimPermissions.mayBeTrusted(factionId(playerId), hasChosen(playerId));
+    }
+
+    /**
+     * Whether this player's existing claims have to be released because they joined Anarchism.
+     *
+     * @see ClaimPermissions#mustReleaseLand(String, boolean)
+     */
+    public static boolean mustReleaseLand(UUID playerId) {
+        return ClaimPermissions.mustReleaseLand(factionId(playerId), hasChosen(playerId));
     }
 
     /** The claim-cost multiplier for this player; {@code 1.0} when there is no backend. */

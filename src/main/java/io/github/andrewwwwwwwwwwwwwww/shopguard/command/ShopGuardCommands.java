@@ -9,6 +9,7 @@ import io.github.andrewwwwwwwwwwwwwww.shopguard.ShopGuard;
 import io.github.andrewwwwwwwwwwwwwww.shopguard.claim.AdminZone;
 import io.github.andrewwwwwwwwwwwwwww.shopguard.claim.Claim;
 import io.github.andrewwwwwwwwwwwwwww.shopguard.economy.ClaimPricing;
+import io.github.andrewwwwwwwwwwwwwww.shopguard.faction.PlayerFactions;
 import net.minecraft.ChatFormatting;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
@@ -213,6 +214,15 @@ public final class ShopGuardCommands {
             s.sendFailure(Component.literal("That claim isn't yours."));
             return 0;
         }
+        // Only the "add" direction is restricted. Removing someone from the trust list is the owner
+        // defending their own claim and must keep working — otherwise the rule would leave an Anarchist
+        // stuck on a trust list with no way to be taken off it.
+        boolean adding = !c.trusted.contains(target.getUUID());
+        if (adding && !PlayerFactions.mayBeTrusted(target.getUUID())) {
+            s.sendFailure(Component.literal(PlayerFactions.describe(target.getUUID())
+                    + " refuses to be trusted on someone else's claim."));
+            return 0;
+        }
         boolean added = c.trusted.add(target.getUUID());
         if (!added) c.trusted.remove(target.getUUID());
         ShopGuard.STORE.save();
@@ -248,6 +258,16 @@ public final class ShopGuardCommands {
             s.sendFailure(Component.literal(name + " already owns this claim."));
             return 0;
         }
+        // Refuse the recipient before the preview, so a player is never told to type "confirm" for a
+        // transfer that cannot happen. The sender's own party is irrelevant: giving a claim away is not
+        // accepting government.
+        if (!PlayerFactions.mayReceiveTransfer(target.getUUID())) {
+            s.sendFailure(Component.literal(PlayerFactions.describe(target.getUUID())
+                    + " refuses to recognise land ownership, so this claim cannot be transferred to "
+                    + name + "."));
+            return 0;
+        }
+
         // The recipient inherits the whole footprint, so their total limit has to cover it.
         int recipientTotal = ShopGuard.STORE.totalCellsOfOwner(target.getUUID()) + c.shape.count();
         if (!ProtectionHandler.isOp(target) && recipientTotal > ShopGuard.CONFIG.maxTotalPerPlayer) {

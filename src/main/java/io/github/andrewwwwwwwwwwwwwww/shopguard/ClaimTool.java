@@ -3,6 +3,7 @@ package io.github.andrewwwwwwwwwwwwwww.shopguard;
 import io.github.andrewwwwwwwwwwwwwww.shopguard.claim.Claim;
 import io.github.andrewwwwwwwwwwwwwww.shopguard.claim.ClaimShape;
 import io.github.andrewwwwwwwwwwwwwww.shopguard.economy.ClaimPricing;
+import io.github.andrewwwwwwwwwwwwwww.shopguard.faction.PlayerFactions;
 import net.fabricmc.fabric.api.event.player.UseBlockCallback;
 import net.fabricmc.fabric.api.event.player.UseItemCallback;
 import net.minecraft.ChatFormatting;
@@ -121,9 +122,12 @@ public final class ClaimTool {
     private static void quoteRate(ServerPlayer sp) {
         if (!ClaimPricing.charging()) return;
         if (ShopGuard.CONFIG.claimCostFreeForOps && ProtectionHandler.isOp(sp)) return;
-        sp.sendOverlayMessage(Component.literal("Costs " + ClaimPricing.money(ClaimPricing.quote(1))
-                        + " per block right now (inflation factor " + ClaimPricing.trim(ClaimPricing.factor()) + "x)")
-                .withStyle(ChatFormatting.AQUA));
+        // The player's own rate, so a Monarchy owner sees the halved price the charge will actually take.
+        sp.sendOverlayMessage(Component.literal("Costs " + ClaimPricing.money(ClaimPricing.quote(sp, 1))
+                        + " per block right now (inflation factor " + ClaimPricing.trim(ClaimPricing.factor()) + "x"
+                        + (ClaimPricing.discounted(sp)
+                        ? ", your party discount included" : "") + ")")
+                .withStyle(ClaimPricing.discounted(sp) ? ChatFormatting.GREEN : ChatFormatting.AQUA));
     }
 
     private static String dim(ServerPlayer sp) {
@@ -172,6 +176,13 @@ public final class ClaimTool {
         int ownerTotal = ShopGuard.STORE.totalCellsOfOwner(uid) - absorbedCells + merged.count();
         if (!op && ownerTotal > ShopGuard.CONFIG.maxTotalPerPlayer) {
             error(sp, "That would exceed your total claim limit (" + ShopGuard.CONFIG.maxTotalPerPlayer + " blocks).");
+            return;
+        }
+
+        // Anarchism's Vô chính phủ: no government, no claims. Checked here — after the overlap, zone and
+        // area checks and before the charge — so a refusal costs nothing and mutates nothing.
+        if (!PlayerFactions.mayClaim(uid)) {
+            error(sp, PlayerFactions.describe(uid) + " refuses to recognise land ownership, so it cannot claim.");
             return;
         }
 

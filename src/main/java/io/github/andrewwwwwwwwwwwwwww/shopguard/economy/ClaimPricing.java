@@ -63,10 +63,34 @@ public final class ClaimPricing {
         return ClaimCostMath.ratePerBlock(inflation(), params());
     }
 
-    /** What {@code netNewColumns} costs, for quoting. Zero when pricing is off. */
+    /** What {@code netNewColumns} costs at the undiscounted rate. Zero when pricing is off. */
     public static long quote(int netNewColumns) {
         if (!charging()) return 0L;
         return ClaimCostMath.charge(netNewColumns, inflation(), params());
+    }
+
+    /**
+     * What {@code netNewColumns} costs <em>this player</em>, with their party's discount applied.
+     *
+     * <p>Every quoted figure has to go through here rather than {@link #quote(int)}. A discount applied only
+     * in {@link #charge} would leave the shovel's price overlay and {@code /claim} advertising the full rate
+     * to a Monarchy owner, who would then be charged less than the tool promised — technically fine for the
+     * player, but it makes the advertised rate a lie and hides the buff entirely.
+     */
+    public static long quote(ServerPlayer player, int netNewColumns) {
+        if (!charging()) return 0L;
+        return ClaimCostMath.charge(netNewColumns, inflation(), params(), discountFor(player));
+    }
+
+    /** This player's claim-cost multiplier: Monarchy halves it, everyone else pays full price. */
+    public static double discountFor(ServerPlayer player) {
+        return player == null ? 1.0 : io.github.andrewwwwwwwwwwwwwww.shopguard.faction.PlayerFactions
+                .claimCostMultiplier(player.getUUID());
+    }
+
+    /** Whether this player gets a party discount, for saying so in a message. */
+    public static boolean discounted(ServerPlayer player) {
+        return discountFor(player) < 1.0;
     }
 
     private static boolean exempt(ServerPlayer player) {
@@ -86,7 +110,7 @@ public final class ClaimPricing {
         if (!charging()) return Result.free();
         if (exempt(player)) return Result.free();
 
-        long cost = quote(netNewColumns);
+        long cost = quote(player, netNewColumns);
         if (cost <= 0) return Result.free();
 
         ClaimEconomy.Backend backend = ClaimEconomy.backend();
@@ -222,10 +246,13 @@ public final class ClaimPricing {
         ClaimCostMath.Params p = params();
         double f = ClaimCostMath.factor(infl, p);
 
-        sink.accept(Component.literal("Claim cost: " + money(ClaimCostMath.charge(1, infl, p)) + " per block"
+        double own = discountFor(player);
+        sink.accept(Component.literal("Claim cost: "
+                        + money(ClaimCostMath.charge(1, infl, p, own)) + " per block"
                         + (c.claimCostBaseFee > 0 ? " + " + money(c.claimCostBaseFee) + " per claim" : "")
-                        + "  [rate " + trim(ratePerBlock()) + " x factor " + trim(f) + "]")
-                .withStyle(ChatFormatting.GRAY));
+                        + "  [rate " + trim(ratePerBlock()) + " x factor " + trim(f)
+                        + (own < 1.0 ? " x your party " + trim(own) : "") + "]")
+                .withStyle(own < 1.0 ? ChatFormatting.GREEN : ChatFormatting.GRAY));
         sink.accept(Component.literal("  inflation " + trim(infl) + "x / reference "
                         + trim(c.claimCostReferenceMultiplier) + "x, clamped to ["
                         + trim(c.claimCostMinFactor) + ", " + trim(c.claimCostMaxFactor) + "]"

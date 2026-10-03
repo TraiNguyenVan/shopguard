@@ -77,6 +77,63 @@ class ClaimCostMathTest {
         assertEquals(1, ClaimCostMath.charge(1, 0.5, DEFAULTS));
     }
 
+    // ---- Monarchy's Tự trị: halved claim cost ----
+
+    @Test
+    void thePartyMultiplierHalvesTheWholePriceIncludingTheBaseFee() {
+        ClaimCostMath.Params withFee = new ClaimCostMath.Params(2.5, 500L, 7.36, 0.25, 4.0, 0.5, 0.0);
+        // 400 blocks at the reference rate: 500 + 400 * 2.5 = 1 500. Halved, it is 750 — a discount on the
+        // per-block rate alone would have left the 500 fee at full price and charged 1 250.
+        assertEquals(1_500, ClaimCostMath.charge(400, INFLATION_NOW, withFee));
+        assertEquals(750, ClaimCostMath.charge(400, INFLATION_NOW, withFee, 0.5));
+    }
+
+    @Test
+    void thePartyMultiplierNeverRoundsAPriceAwayToNothing() {
+        // 63 blocks cost 157.5 -> 158 undiscounted, and half of that is 79 exactly. Take a price that is
+        // odd instead: 1 column at the clamped floor costs 1, and half of 1 must still cost 1, not 0.
+        assertEquals(1, ClaimCostMath.charge(1, 0.5, DEFAULTS));
+        assertEquals(1, ClaimCostMath.charge(1, 0.5, DEFAULTS, 0.5));
+        // 25 blocks at the floor is 15.625 -> 16, and half of 16 is 8.
+        assertEquals(8, ClaimCostMath.charge(25, 0.5, DEFAULTS, 0.5));
+    }
+
+    @Test
+    void aMultiplierOfOneOrMoreCannotChangeThePrice() {
+        // ShopGuard's advertised rate is the ceiling. A misconfigured faction bonus must not become a
+        // surcharge nobody was quoted, so anything at or above 1.0 is the plain price.
+        assertEquals(158, ClaimCostMath.charge(63, INFLATION_NOW, DEFAULTS, 1.0));
+        assertEquals(158, ClaimCostMath.charge(63, INFLATION_NOW, DEFAULTS, 1.5));
+        assertEquals(158, ClaimCostMath.charge(63, INFLATION_NOW, DEFAULTS, Double.POSITIVE_INFINITY));
+    }
+
+    @Test
+    void aBrokenMultiplierIsTreatedAsNoDiscountRatherThanAsFree() {
+        // Zero, negative and NaN all mean "the faction has no discount". Reading zero as "everything is
+        // free" would hand out land for nothing whenever a config value went wrong.
+        assertEquals(158, ClaimCostMath.charge(63, INFLATION_NOW, DEFAULTS, 0.0));
+        assertEquals(158, ClaimCostMath.charge(63, INFLATION_NOW, DEFAULTS, -0.5));
+        assertEquals(158, ClaimCostMath.charge(63, INFLATION_NOW, DEFAULTS, Double.NaN));
+        assertEquals(0, ClaimCostMath.charge(0, INFLATION_NOW, DEFAULTS, 0.5),
+                "a free merge stays free under any multiplier");
+    }
+
+    @Test
+    void aDiscountNeverTurnsAFreeClaimIntoACost() {
+        ClaimCostMath.Params free = new ClaimCostMath.Params(0.0, 0L, 7.36, 0.25, 4.0, 0.5, 0.0);
+        assertEquals(0, ClaimCostMath.charge(400, INFLATION_NOW, free, 0.5));
+    }
+
+    @Test
+    void affordableColumnsGrowsWithTheDiscount() {
+        // 400 blocks cost 1 000, so 1 000 buys 400 columns full price and 800 discounted.
+        assertEquals(400, ClaimCostMath.affordableColumns(1_000, INFLATION_NOW, DEFAULTS));
+        assertEquals(800, ClaimCostMath.affordableColumns(1_000, INFLATION_NOW, DEFAULTS, 0.5));
+        assertEquals(400, ClaimCostMath.affordableColumns(1_000, INFLATION_NOW, DEFAULTS, 1.0),
+                "a multiplier of 1.0 is the plain answer");
+        assertEquals(0, ClaimCostMath.affordableColumns(1, INFLATION_NOW, DEFAULTS, 0.5));
+    }
+
     @Test
     void theBaseFeeAppliesOnceRegardlessOfSize() {
         ClaimCostMath.Params withFee = new ClaimCostMath.Params(2.5, 500L, 7.36, 0.25, 4.0, 0.5, 0.0);

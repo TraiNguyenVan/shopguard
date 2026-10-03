@@ -80,6 +80,35 @@ public final class ClaimCostMath {
     }
 
     /**
+     * The same charge with a per-player multiplier on the whole price — Monarchy's {@code Tự trị}, halved
+     * claim cost, supplied by EconomyCraft as {@code factions.monarchy.claim_cost_multiplier}.
+     *
+     * <p>Three deliberate decisions, all of which the tests pin:
+     *
+     * <ul>
+     *   <li><strong>The multiplier scales the whole charge, flat fee included.</strong> Halving only the
+     *       per-column rate would leave {@code claimCostBaseFee} at full price, and a base fee is a large
+     *       share of the price for a small claim — so "halved" would be visibly not halved.</li>
+     *   <li><strong>The result rounds up, never down.</strong> {@code ceil} means a discounted price is
+     *       never rounded toward zero, so a 1-unit charge stays 1 unit instead of becoming free, and the
+     *       discount never quietly takes a column's worth of money the arithmetic says was owed.</li>
+     *   <li><strong>A multiplier above 1 cannot raise the price.</strong> The result is capped at the
+     *       undiscounted charge, and a broken multiplier (zero, negative, NaN) is treated as {@code 1.0}.
+     *       ShopGuard's advertised rate is the ceiling, whatever a caller passes in — a misconfigured
+     *       faction bonus must not become a surcharge nobody was quoted.</li>
+     * </ul>
+     */
+    public static long charge(int netNewColumns, double inflationMultiplier, Params p, double multiplier) {
+        long full = charge(netNewColumns, inflationMultiplier, p);
+        if (full <= 0) return 0L;
+        double m = multiplier;
+        if (!(m > 0) || Double.isNaN(m) || Double.isInfinite(m) || m >= 1.0) return full;
+        double discounted = Math.ceil(full * m);
+        if (!(discounted > 0)) return 1L;
+        return Math.min(full, (long) discounted);
+    }
+
+    /**
      * What a carve gives back as cash, and what it removes from the claim's outstanding {@code paid}.
      *
      * <p>Carving pays nothing by default, but the claim's {@code paid} is always reduced in proportion to
@@ -143,5 +172,24 @@ public final class ClaimCostMath {
         double cols = (balance - p.baseFee()) / rate;
         if (cols >= Integer.MAX_VALUE) return Integer.MAX_VALUE;
         return (int) Math.floor(cols);
+    }
+
+    /**
+     * How many columns this balance affords once {@code multiplier} is applied.
+     *
+     * <p>Derived by scaling the balance rather than re-solving the inequality: because
+     * {@link #charge(int, double, Params, double)} scales the entire price, a discounted price is the
+     * undiscounted price of a balance divided by the multiplier. Exact up to the {@code ceil} in
+     * {@code charge}, which can make the true answer one column lower — the safe direction for a "you can
+     * afford" hint, and the same direction as the undiscounted version's own rounding.
+     */
+    public static int affordableColumns(long balance, double inflationMultiplier, Params p, double multiplier) {
+        double m = multiplier;
+        if (!(m > 0) || Double.isNaN(m) || Double.isInfinite(m) || m >= 1.0) {
+            return affordableColumns(balance, inflationMultiplier, p);
+        }
+        double scaled = (double) balance / m;
+        if (scaled >= Long.MAX_VALUE) return Integer.MAX_VALUE;
+        return affordableColumns((long) Math.floor(scaled), inflationMultiplier, p);
     }
 }

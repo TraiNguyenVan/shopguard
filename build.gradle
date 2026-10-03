@@ -16,6 +16,11 @@ dependencies {
     // absent. Every call site goes through the ClaimEconomy.Backend indirection for that reason.
     compileOnly files("${project.economycraft_jar}")
 
+    // Also on the test classpath so FactionIdContractTest can check the copied party ids against the real
+    // EconomyCraft API. Tests never ship, and a class that only exists to be asserted on is not worth a
+    // compileOnly dance.
+    testImplementation files("${project.economycraft_jar}")
+
     testImplementation 'org.junit.jupiter:junit-jupiter:5.13.4'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher:1.13.4'
 }
@@ -46,6 +51,11 @@ tasks.register('verifyEconomycraftJar') {
             'com/reazip/economycraft/api/v1/BalanceApi.class',
             'com/reazip/economycraft/api/v1/BalanceMutationResult.class',
             'com/reazip/economycraft/api/v1/MutationSource.class',
+            // Phase 10: the faction rules (halved claim cost for Monarchy, no-government blocks for
+            // Anarchists) are compiled against these two. Without them in the guard, a jar predating the
+            // faction API would fail deep in the build with a "cannot find symbol" instead of here.
+            'com/reazip/economycraft/api/v1/FactionApi.class',
+            'com/reazip/economycraft/api/v1/FactionIds.class',
     ]
     inputs.file(jar)
     doLast {
@@ -60,7 +70,8 @@ tasks.register('verifyEconomycraftJar') {
         if (missing) {
             throw new GradleException("The EconomyCraft jar at ${jar} is missing API classes " +
                     "${missing.join(', ')}. It predates the claim-pricing API additions " +
-                    "(inflationMultiplier / medianActiveBalance / dailySellLimit) — rebuild EconomyCraft.")
+                    "(inflationMultiplier / medianActiveBalance / dailySellLimit) or the Phase 10 faction API " +
+                    "(FactionApi / FactionIds) — rebuild EconomyCraft.")
         }
     }
 }

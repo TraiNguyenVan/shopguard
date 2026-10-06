@@ -68,75 +68,40 @@ class ClaimPermissionsTest {
     }
 
     @Test
-    void aPlayerWhoHasChosenNothingIsUnrestrictedEvenThoughTheirPartyIdIsAnarchism() {
-        // The regression this two-argument form exists for. EconomyCraft's default party is Anarchism, so on
-        // a server where nobody has run /eco party every player reports "anarchism" while having chosen
-        // nothing. Gating on the id alone would freeze claiming, trusting and transfers server-wide —
-        // operators included — for having never opened a menu.
-        assertTrue(ClaimPermissions.mayClaim(FactionIds.ANARCHISM, false));
-        assertTrue(ClaimPermissions.mayReceiveTransfer(FactionIds.ANARCHISM, false));
-        assertTrue(ClaimPermissions.mayBeTrusted(FactionIds.ANARCHISM, false));
+    void anUndecidedPlayerIsAnAnarchistBecauseTheirPartyIdIsAnarchism() {
+        // Deliberate, and the reason there is no hasChosen argument anywhere in this class. EconomyCraft's
+        // default party is Anarchism, so an undecided player's id is Anarchism. On a server where nearly
+        // everyone has run /eco party the undecided few should be under the rules they are actually subject
+        // to everywhere else (tax, land, speed) rather than in a privileged exemption nobody asked for.
+        assertFalse(ClaimPermissions.mayClaim(FactionIds.ANARCHISM));
+        assertFalse(ClaimPermissions.mayReceiveTransfer(FactionIds.ANARCHISM));
+        assertFalse(ClaimPermissions.mayBeTrusted(FactionIds.ANARCHISM));
+        assertTrue(ClaimPermissions.mustReleaseLand(FactionIds.ANARCHISM));
     }
 
     @Test
-    void optingIntoAnarchismStillRefusesAllThree() {
-        // The other half of the pair: the gate must not become a way to keep the rules from ever applying.
-        // Once a player has chosen, hasChosen is true and the strict single-argument rules apply as before.
-        assertFalse(ClaimPermissions.mayClaim(FactionIds.ANARCHISM, true));
-        assertFalse(ClaimPermissions.mayReceiveTransfer(FactionIds.ANARCHISM, true));
-        assertFalse(ClaimPermissions.mayBeTrusted(FactionIds.ANARCHISM, true));
-    }
-
-    @Test
-    void havingChosenAnyOtherPartyIsUnrestricted() {
+    void choosingAnotherPartyLiftsTheDefault() {
         for (String party : new String[]{FactionIds.COMMUNISM, FactionIds.CAPITALISM, FactionIds.MONARCHY}) {
-            assertTrue(ClaimPermissions.mayClaim(party, true), party);
-            assertTrue(ClaimPermissions.mayReceiveTransfer(party, true), party);
-            assertTrue(ClaimPermissions.mayBeTrusted(party, true), party);
+            assertTrue(ClaimPermissions.mayClaim(party), party);
+            assertTrue(ClaimPermissions.mayReceiveTransfer(party), party);
+            assertTrue(ClaimPermissions.mayBeTrusted(party), party);
         }
-    }
-
-    @Test
-    void havingChosenNothingStillOverridesAnUnknownPartyId() {
-        // A hand-edited save naming a party this build has never heard of must not lock anyone out, whether
-        // or not a choice was recorded.
-        assertTrue(ClaimPermissions.mayClaim("somethingelse", false));
-        assertTrue(ClaimPermissions.mayReceiveTransfer("somethingelse", false));
-        assertTrue(ClaimPermissions.mayBeTrusted("somethingelse", false));
     }
 
     // --- releasing land a player already holds ---
 
     @Test
-    void joiningAnarchismReleasesTheLandTheyAlreadyHold() {
-        assertTrue(ClaimPermissions.mustReleaseLand(FactionIds.ANARCHISM, true));
-    }
-
-    @Test
-    void aPlayerWhoHasNotChosenKeepsTheirLand() {
-        // The half that is easy to get wrong. The effective id is Anarchism for an undecided player, so
-        // releasing on the id alone would strip the land of every player who has never opened the menu —
-        // and hand them a refund they were never charged, since a claim they cannot make may still be one
-        // they were given, carved, or placed by an admin.
-        assertFalse(ClaimPermissions.mustReleaseLand(FactionIds.ANARCHISM, false));
+    void beingAnAnarchistReleasesTheLandTheyAlreadyHold() {
+        assertTrue(ClaimPermissions.mustReleaseLand(FactionIds.ANARCHISM));
     }
 
     @Test
     void everyOtherPartyKeepsItsLand() {
         for (String party : new String[]{FactionIds.COMMUNISM, FactionIds.CAPITALISM, FactionIds.MONARCHY}) {
-            assertFalse(ClaimPermissions.mustReleaseLand(party, true), party);
+            assertFalse(ClaimPermissions.mustReleaseLand(party), party);
         }
         // No party system, and an id this build does not know: nothing to enforce, nothing to take.
-        assertFalse(ClaimPermissions.mustReleaseLand(null, true));
-        assertFalse(ClaimPermissions.mustReleaseLand(null, false));
-        assertFalse(ClaimPermissions.mustReleaseLand("somethingelse", true));
-    }
-
-    @Test
-    void releasingIsNotTheNegationOfClaiming() {
-        // Documented as a trap: these two answer different questions. A player who chose nothing may claim
-        // new land AND keep what they have, so neither can be derived from the other.
-        assertTrue(ClaimPermissions.mayClaim(FactionIds.ANARCHISM, false));
-        assertFalse(ClaimPermissions.mustReleaseLand(FactionIds.ANARCHISM, false));
+        assertFalse(ClaimPermissions.mustReleaseLand(null));
+        assertFalse(ClaimPermissions.mustReleaseLand("somethingelse"));
     }
 }

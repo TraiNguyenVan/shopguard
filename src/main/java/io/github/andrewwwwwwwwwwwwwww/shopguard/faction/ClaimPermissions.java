@@ -11,15 +11,15 @@ package io.github.andrewwwwwwwwwwwwwww.shopguard.faction;
  *
  * <p><strong>{@code null} means "no faction system".</strong> Every method answers permissively for it,
  * because the only correct behaviour without EconomyCraft installed is to leave claims working exactly as
- * they did before. That is also the answer for a player who has chosen no party, which is deliberate: with
- * no economy there is no party, and with no choice there is no party to restrict them.
+ * they did before.
  *
- * <p><strong>A player who has chosen nothing is unrestricted, and that needs saying separately.</strong>
- * EconomyCraft's default party is Anarchism ({@code FactionIds.DEFAULT}), so a consumer reading only the
- * effective party id cannot tell "opted into Anarchism" from "never made a choice" — and on a server with
- * no saved parties that is every player, operators included. The two-argument overloads take
- * {@code hasChosen} for exactly this reason: <strong>restricting a party must never be a side effect of a
- * player not having opened a menu yet.</strong>
+ * <p><strong>A player who has chosen nothing is an Anarchist</strong>, and that follows from the id alone:
+ * EconomyCraft's default party is {@code FactionIds.ANARCHISM}, so {@code factionId} answers Anarchism for
+ * somebody who has never opened the menu. There is deliberately no second {@code hasChosen} argument here —
+ * on a server where nearly every player has picked a party, the undecided few should be under the rules they
+ * are actually subject to everywhere else (tax, land, speed) rather than in a privileged exemption nobody
+ * chose. A player who does not want those rules chooses a party; {@code /eco party reset} puts them back
+ * here on purpose.
  *
  * <p><strong>Unknown ids are permissive too</strong>, and that is a policy choice rather than an oversight.
  * A typo or a party added by a newer EconomyCraft must not lock every player out of claiming; the cost of
@@ -69,40 +69,17 @@ public final class ClaimPermissions {
 
     /**
      * Whether this player's existing claims must be released.
+ *
+     * <p>Where {@link #mayClaim} refuses a <em>new</em> claim, this covers land a player already holds: being an
+     * Anarchist is a statement that they do not recognise land ownership, so the claims they brought with them
+     * into the party have to go with it. Leaving them would leave the one thing Anarchism is defined by — an
+     * owner standing on protected ground — true for the only party that denies it exists.
      *
-     * <p>Where {@link #mayClaim} refuses a <em>new</em> claim, this covers land a player already holds: having
-     * chosen Anarchism is a statement that they do not recognise land ownership, so the claims they brought with
-     * them into the party have to go with the choice. Leaving them would leave the one thing Anarchism is
-     * defined by — an owner standing on protected ground — true for the only party that denies it exists.
-     *
-     * <p>The player must have <em>chosen</em> Anarchism. A player with no choice is not an Anarchist (see the
-     * class note), so their land is untouched and they keep every refund they are already owed.
-     *
-     * <p><strong>This is deliberately not the same question as {@link #mayClaim} negated.</strong> A player who
-     * never chose anything may claim new land, and this returns {@code false} for them, so
-     * {@code !mayClaim(id, hasChosen) == mustReleaseLand(id, hasChosen)} does not hold and must not be assumed.
+     * <p>Not the same question as {@link #mayClaim} negated. A player who has never chosen anything is also
+     * an Anarchist, so for them both are {@code true}: the refund path runs once, through
+     * {@code /claim remove}, rather than the claim being silently dropped.
      */
-    public static boolean mustReleaseLand(String factionId, boolean hasChosen) {
-        return hasChosen && isAnarchist(factionId);
-    }
-
-    /**
-     * {@link #mayClaim} for a player who may not yet have chosen a party.
-     *
-     * <p>No choice means unrestricted, even though the effective id is Anarchism. See the class note: this
-     * is the difference between a player who joined Anarchism and a player who has never been asked.
-     */
-    public static boolean mayClaim(String factionId, boolean hasChosen) {
-        return !hasChosen || mayClaim(factionId);
-    }
-
-    /** {@link #mayReceiveTransfer} for a player who may not yet have chosen a party. */
-    public static boolean mayReceiveTransfer(String factionId, boolean hasChosen) {
-        return !hasChosen || mayReceiveTransfer(factionId);
-    }
-
-    /** {@link #mayBeTrusted} for a player who may not yet have chosen a party. */
-    public static boolean mayBeTrusted(String factionId, boolean hasChosen) {
-        return !hasChosen || mayBeTrusted(factionId);
+    public static boolean mustReleaseLand(String factionId) {
+        return isAnarchist(factionId);
     }
 }

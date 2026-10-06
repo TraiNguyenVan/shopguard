@@ -23,6 +23,10 @@ import java.util.UUID;
  * <p><strong>The rules themselves are not here.</strong> {@link ClaimPermissions} holds them as pure
  * functions of a party id, so what Anarchism may and may not do is unit-testable without a server; this
  * class only supplies the id.
+ *
+ * <p><strong>A player who has chosen nothing reads as Anarchism</strong>, because EconomyCraft's default party
+ * is Anarchism and the id cannot tell the two apart. Nothing here asks whether a choice was made — see the
+ * class note in {@link ClaimPermissions}.
  */
 public final class PlayerFactions {
     private PlayerFactions() {}
@@ -34,14 +38,6 @@ public final class PlayerFactions {
 
         /** The party's English display name, for telling a player which party refused them. */
         String factionDisplayName(UUID playerId);
-
-        /**
-         * Whether the player has actually chosen a party, as opposed to falling back to the default.
-         *
-         * <p>Needed because the default party is Anarchism, so the id alone cannot distinguish an opt-in
-         * from a player who has never been asked. See {@link ClaimPermissions}.
-         */
-        boolean hasChosen(UUID playerId);
 
         /** The multiplier to apply to this player's claim cost. {@code 1.0} means unchanged. */
         double claimCostMultiplier(UUID playerId);
@@ -77,48 +73,38 @@ public final class PlayerFactions {
     /**
      * The player's party id, or {@code null} when there is no backend.
      *
-     * <p>Returning {@code null} rather than a default id is deliberate: "no economy" and "a player who
-     * chose nothing" are different situations, and {@code ClaimPermissions} gives them the same answer
-     * on purpose (neither party restricts claims) without pretending they are the same fact.
+     * <p>Returning {@code null} rather than a default id is deliberate: "no economy" and "an Anarchist" are
+     * different situations, and {@code ClaimPermissions} answers permissively for the first without pretending
+     * the two are the same fact. The <em>default</em> party is not this method's business — it arrives already
+     * applied, from EconomyCraft.
      */
     public static String factionId(UUID playerId) {
         Backend backend = backend();
         return backend == null ? null : backend.factionId(playerId);
     }
 
-    /**
-     * Whether this player has actually chosen a party.
-     *
-     * <p>{@code false} whenever there is no backend, so a server without EconomyCraft is unrestricted — the
-     * same degradation as every other method here.
-     */
-    public static boolean hasChosen(UUID playerId) {
-        Backend backend = backend();
-        return backend != null && backend.hasChosen(playerId);
-    }
-
     /** Whether this player may claim land, given their party. */
     public static boolean mayClaim(UUID playerId) {
-        return ClaimPermissions.mayClaim(factionId(playerId), hasChosen(playerId));
+        return ClaimPermissions.mayClaim(factionId(playerId));
     }
 
     /** Whether a claim may be transferred <em>to</em> this player. */
     public static boolean mayReceiveTransfer(UUID playerId) {
-        return ClaimPermissions.mayReceiveTransfer(factionId(playerId), hasChosen(playerId));
+        return ClaimPermissions.mayReceiveTransfer(factionId(playerId));
     }
 
     /** Whether this player may be added to another player's trust list. */
     public static boolean mayBeTrusted(UUID playerId) {
-        return ClaimPermissions.mayBeTrusted(factionId(playerId), hasChosen(playerId));
+        return ClaimPermissions.mayBeTrusted(factionId(playerId));
     }
 
     /**
-     * Whether this player's existing claims have to be released because they joined Anarchism.
+     * Whether this player's existing claims have to be released because they are an Anarchist.
      *
-     * @see ClaimPermissions#mustReleaseLand(String, boolean)
+     * @see ClaimPermissions#mustReleaseLand(String)
      */
     public static boolean mustReleaseLand(UUID playerId) {
-        return ClaimPermissions.mustReleaseLand(factionId(playerId), hasChosen(playerId));
+        return ClaimPermissions.mustReleaseLand(factionId(playerId));
     }
 
     /** The claim-cost multiplier for this player; {@code 1.0} when there is no backend. */

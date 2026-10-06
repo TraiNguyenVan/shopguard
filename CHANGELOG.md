@@ -1,5 +1,33 @@
 # Changelog
 
+## Unreleased — An undecided player is an Anarchist
+
+EconomyCraft's default party is Anarchism, so a player who has never run `/eco party` already has that id.
+Since 0.11.0 the faction rules took the **record** as well, so such a player could claim, be trusted, receive
+transfers and keep land while paying full tax and showing no party tag. They now get the whole of Anarchism:
+exempt from every tax scope, tagged `Ⓐ`, and under its land restrictions.
+
+### Changed
+- `ClaimPermissions` keys on the party id alone again. `mustReleaseLand` no longer takes a `hasChosen`
+  argument, and the three permissive two-argument overloads are gone — with no gate, there was nothing for
+  them to decide.
+- **`PlayerFactions.Backend` loses `hasChosen`.** It had no other caller.
+- A player who has chosen nothing is refused a new claim, refused a transfer in, refused a trust entry, and
+  has land they already hold released through the ordinary `/claim remove` refund path.
+
+That last one is the only rule here that moves money, and it is worth reading twice: **a claim held by a
+player who never chose a party is released and refunded.** It is correct under the rule — they cannot claim,
+so land they hold is a contradiction — but it is not free, and it now applies to a much larger set of
+players than it did. Watch the first live-fire.
+
+Choosing a party lifts all of it.
+
+### Unchanged, deliberately
+- A server with no EconomyCraft installed is still unrestricted. `null` means "no party system", which is a
+  genuinely different situation from "the default party" and still answers permissively.
+- An unknown party id is still permissive, so a typo or a party from a newer EconomyCraft cannot lock every
+  player out of claiming.
+
 ## 0.11.0
 - **New: priced land claims, tied to the server's inflation.** New claim area costs money, and the price
   moves with the money supply automatically. **Disabled by default** — `claimCostEnabled` and

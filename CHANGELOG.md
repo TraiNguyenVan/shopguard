@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased — Piston pops obey the claim boundary
+
+A piston pushing into a block it pops rather than moves (`PushReaction.POPPED` — sugar cane, bamboo,
+torches, crops) had the whole move cancelled whenever that block stood inside **any** claim, even a farm
+built entirely inside the owner's own claim — so piston sugar-cane farms silently did nothing in claimed
+land while working in the wilderness. Pushed blocks were never affected, which is why cobblestone and
+gravel still moved: they take the push path, which was already boundary-checked.
+
+### Fixed
+- `PistonStructureResolverMixin`'s destroy loop now applies the same rule as its push loop: a pop is
+  cancelled only when it crosses a claim boundary. A piston may pop blocks in its own claim (or in
+  unclaimed land, where nothing changes); a piston outside a claim still cannot pop blocks inside it,
+  and a piston inside a claim cannot pop blocks outside it.
+- The rule itself lives in `ClaimBoundaries.crossesBoundary`, a pure function, pinned by tests that
+  need no server.
+
+### Unchanged, deliberately
+- Push behavior is untouched — same-claim pushes and wilderness pushes behave exactly as before.
+- Piston retraction behavior is untouched.
+- No config keys were added; the boundary rule needs no tuning.
+
 ## 0.9.0
 - **Minecraft 26.3 build.** ShopGuard now ships for 26.3 (Fabric Loader 0.19.3 → 0.19.5, Fabric API
   0.152.1+26.2 → 0.160.5+26.3). The 26.2 build carries on alongside it. No behaviour changes.

@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased — Piston pops obey the claim boundary
+## 0.12.0 — Piston and faction claim rules
 
 A piston pushing into a block it pops rather than moves (`PushReaction.POPPED` — sugar cane, bamboo,
 torches, crops) had the whole move cancelled whenever that block stood inside **any** claim, even a farm
@@ -21,7 +21,7 @@ gravel still moved: they take the push path, which was already boundary-checked.
 - Piston retraction behavior is untouched.
 - No config keys were added; the boundary rule needs no tuning.
 
-## Unreleased — An undecided player is an Anarchist
+### An undecided player is an Anarchist
 
 EconomyCraft's default party is Anarchism, so a player who has never run `/eco party` already has that id.
 Since 0.11.0 the faction rules took the **record** as well, so such a player could claim, be trusted, receive
